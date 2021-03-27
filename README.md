@@ -5,6 +5,9 @@ Binance Smart Chain tracker:
 - Monitors new traiding pairs at binance.com
 - Monitors new transactions to PancakeSwap main staking account
 - Reporting through telegram
+- powered by bscScan & CoinMarketCap
+- ~~содержит говнокод~~ !average code quality!
+- 
 ***
 
 ## Before Use:
