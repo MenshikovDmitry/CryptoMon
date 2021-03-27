@@ -1,4 +1,6 @@
+importlib_resources
+dataclasses
 bscscan-python
 python-binance
 selenium
-telebot
+pyTelegramBotAPI
