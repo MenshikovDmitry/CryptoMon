@@ -1,0 +1,4 @@
+bscscan-python
+python-binance
+selenium
+telebot
