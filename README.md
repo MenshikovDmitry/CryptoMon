@@ -12,6 +12,7 @@ Binance Smart Chain tracker:
 
 ## Before Use:
 - Download Chromedriver from https://chromedriver.chromium.org/downloads and put it to PATH. Needed for Selenium.
+- Create **constants.py** with API tokens and telegram contacts.
 - Update lib/python3.x/site-packages/bscscan/bscscan.py  line 2:  
 
 from
