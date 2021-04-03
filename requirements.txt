@@ -4,3 +4,4 @@ bscscan-python
 python-binance
 selenium
 pyTelegramBotAPI
+web3

@@ -13,6 +13,9 @@ from requests.exceptions import ConnectionError, Timeout, TooManyRedirects
 
 from bscscan import BscScan
 
+#Web3 for direct access to Blockchain
+from web3 import Web3
+
 #constants
 import constants
 
@@ -62,21 +65,18 @@ class Messenger:
 #==========================================================================================
 #==========================================================================================
 
-class BSCTokenTracker:
-    def __init__(self, BSCSCAN_API_KEY):
-        self.filename = "_token_tracker_data.json"
-        self.caption = "===BSC Token Tracker==="
-        self.bsc = BscScan(BSCSCAN_API_KEY)
-        self.possible_tokens = ['0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',  #WBNB
-                                '0xe9e7cea3dedca5984780bafc599bd69add087d56',  #BUSD
-                                '0x250632378e573c6be1ac2f97fcdf00515d0aa91b',  #BETH    
-                               ]
-        self.ignore_subtokens = ['BZN']
+class TokenTracker:
+    def __init__(self):
+        self.filename = "_w3_token_tracker_data.json"
+        self.caption = "====Token Tracker===="
         self.data = self.load_data()
         if not self.data: 
             self.data = {}
             print("No data loaded")
-            
+        bsc = constants.binance_smart_chain
+        self.w3 = Web3(Web3.HTTPProvider(bsc))
+#------------------------------------------------------------------------
+    
     def save_data(self):
         filename = self.filename
         data = {'data': self.data}
@@ -97,77 +97,72 @@ class BSCTokenTracker:
         return data['data']            
 #------------------------------------------------------------------------
 
-    def token(self, token_address):
+    def swap_rate(self, from_token, to_token, liq_pool):
+        fee = 0.003
+        lp_contract = self.w3.eth.contract(address=liq_pool, abi=constants.lp_abi) 
+        t0_address = lp_contract.functions.token0().call()
+        t1_address = lp_contract.functions.token1().call()
+
+        t0_bal, t1_bal, *_ = lp_contract.functions.getReserves().call()
+
+        rate = t1_bal/t0_bal
+
+        if from_token==t0_address and to_token==t1_address:
+            return rate*(1-fee)
+
+        if from_token==t1_address and to_token==t0_address:
+            return 1/rate * (1-fee)
+
+        raise "WTF"
+#------------------------------------------------------------------------
+
+    def token(self, token_address, force = False):
+
+        #check that the address is correct
+        try:
+            t_address = self.w3.toChecksumAddress(token_address)
+        except Exception as e:
+            print(f"{token_address} is not a correct address", e)
+            return None
+
+        if '0000000000000000000000000000000000' in t_address:
+            #blank stuff, no idea
+            return None
+
         #lookup in dict
-        token = self.data.get(token_address, None)
+        token = self.data.get(t_address, None)
+
+        if force: token=None # downloading new data either way
         if token: return token
         
-        #lookup in BSCScan
-        url = 'https://bscscan.com/address/'+token_address
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
-        try:
-            result = requests.get(url, headers=headers)
-        except Exception as e:
-            print("Unable to obtain token info from bscScan with", e, datetime.datetime.now())
-            print(url)
-            return None
-        result = result.content.decode()
-        self.test = result
+        #lookup in blockchain
+        assert self.w3.isConnected() 
+        token = self.w3.eth.contract(address=t_address, abi = constants.token_abi)
         
-        #matches to <head><title> TokenName (TOKENSYMBOL) Token Tracker | BscScan </title>
-        #pattern = "<head><title>\r\n\t([A-Za-z\.\- ]+)\(([A-Za-z\- ]+)\) Token Tracker Page\| BscScan\r\n</title>"
-        
-        #matches to View <token_address>? Token Tracker Page">TOKEN_NAME (TOKENSYMBOL)
-        pattern='View 0?x?[0-9a-fA-F. ]*Token Tracker Page">([A-Za-z -]+) \(([a-zA-Z\-]+)\)' #updated 27th
-        match = re.findall(string = result, pattern = pattern)
-        if len(match)==0:
-            self.last_err = "Can't parse..", url
-            
-            #print(result[:200])
-            return None
-        
-        token_data = {'name' :match[0][0],
-                      'symbol': match[0][1],
-                      'address': token_address,
+        print(t_address)
+        token_data = {'name' : token.functions.name().call(),
+                      'symbol': token.functions.symbol().call(),
+                      'address': t_address,
                       'pair' : None,
-                      'subtokens': None,}
+                      'subtokens': None,}       
+       
         #Liquidity pair
-        if token_data['symbol']=="Cake-LP":
-            token_data['subtokens'] = self.subtoken(result)
-            if token_data['subtokens']:
-                if len(token_data['subtokens'])<2:
-                    #probably one of reserved
-                    for t in self.possible_tokens:
-                        if int(self.bsc.get_acc_balance_by_token_contract_address(address = token_address,
-                                                      contract_address = t)) > 0:
-                            token_data['subtokens'].append(self.token(t))
-                if token_data['subtokens']:
-                    try:
-                        token_data['pair'] = "%".join([st['symbol'] for st in token_data['subtokens']])
-                    except Exception as e:
-                        pass
-        
-        self.data[token_address] = token_data
-        
-        
+        if token_data['symbol'] in ["Cake-LP", ]:
+            token = self.w3.eth.contract(address=t_address, abi = constants.lp_abi)
+            t0_address = token.functions.token0().call()
+            t1_address = token.functions.token1().call()
+            
+            t0_data = self.token(t0_address)
+            t1_data = self.token(t1_address)
+            
+            token_data['pair'] = f"{t0_data['symbol']}%{t1_data['symbol']}"
+            token_data['subtokens'] = [t0_data, t1_data]
+            token_data['rate'] = self.swap_rate(t0_address, t1_address, t_address)
+            token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"
+            
+        self.data[self.w3.toChecksumAddress(t_address)] = token_data
         self.save_data()
-        self.test = result
-        return token_data
-        
-    
-    def subtoken(self, html_text):
-        #pattern = '<a href="\/token\/(0x[0-9ABCGEFabcdef]{40})">[a-zA-Z]+<\/a>'
-        pattern="href=\\'\/token\/(0x[0-9a-fA-F]{40})\?a=0x[0-9a-fA-F]{40}"
-        match = re.findall(string=html_text, pattern = pattern)
-        
-        if len(match)==0: return None
-        #print("MATCH"+match)
-        token_data = [self.token(address) for address in match]
-        #remove None's
-        token_data = [t for t in token_data if t]
-        token_data = [t for t in token_data if not t['symbol'] in self.ignore_subtokens]
-        
-        return token_data
+        return token_data        
 #==========================================================================================
 #==========================================================================================
 
