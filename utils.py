@@ -40,12 +40,44 @@ def bscscan_token_info(token_address):
     return match[0]
 
 
+import time, datetime, os
+from threading import Thread
+
+#========================================================================
+#========================================================================
+
 class TelegramMessenger:
     def __init__(self, TOKEN):
         self.bot = telebot.TeleBot(TOKEN, parse_mode='Markdown')
         self.contacts = {}
         self.broadcast_list = []
+        
+        #bot commands
+        @self.bot.message_handler(commands=['ok'])
+        def start_message(message):
+            self.bot.send_message(message.chat.id, 'running')
+            
+        @self.bot.message_handler(commands=['files'])
+        def start_message(message):
+            files = [o for o in os.listdir() if o[0]=='_']
+            msg = ""
+            for f in files:
+                delta = datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getmtime(f))
+                secs = delta.seconds
+                t = f"{secs}s" if secs<120 else f"{secs//60}m"
+                msg += f"\n{t} {f}"
+            msg = msg.replace('_', "")
+            self.bot.send_message(message.chat.id, msg, parse_mode=None)    
+            
+        #start the thread
+        self.thread = Thread(target = self.bot.polling, args = ())
+        self.thread.start()
 #------------------------------------------------------------------------
+
+    def message(self, chat_id, message):
+        self.bot.send_message(chat_id, message, parse_mode=None)        
+#------------------------------------------------------------------------
+
     def broadcast(self, feed):
         for uid in self.broadcast_list:
             for message in feed:
