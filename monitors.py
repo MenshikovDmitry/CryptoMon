@@ -366,7 +366,8 @@ class BlockChainLiquidityPairsTracker(CryptoMonitor):
         report = ""
         report += f"block no {tx['blockNumber']}, time {datetime.datetime.fromtimestamp(int(tx['timeStamp']))}, [hash](https://bscscan.com/tx/{tx['hash']})"
         report += f"\nFarm: [{token_inf['pair'].replace('%', '-')}]({bs_token}{token_inf['address']})"
-
+        report += f"\nRate: {round(token_inf['rate'],4)} {token_inf['subtokens'][0]['symbol']} for 1 {token_inf['subtokens'][1]['symbol']}"
+        report += f"\nReserves: {token_inf['reserves']}"
         for i, st in enumerate(token_inf['subtokens']):
             report += f"\n-----\n[Token {i+1}]({bs_token}{st['address']})"
             for key, value in st.items():

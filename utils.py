@@ -97,8 +97,7 @@ class TokenTracker:
         return data['data']            
 #------------------------------------------------------------------------
 
-    def swap_rate(self, from_token, to_token, liq_pool):
-        fee = 0.003
+    def swap_rate(self, from_token, to_token, liq_pool, fee = 0.003):
         lp_contract = self.w3.eth.contract(address=liq_pool, abi=constants.lp_abi) 
         t0_address = lp_contract.functions.token0().call()
         t1_address = lp_contract.functions.token1().call()
@@ -133,13 +132,16 @@ class TokenTracker:
         token = self.data.get(t_address, None)
 
         if force: token=None # downloading new data either way
+        if token and token.get('symbol', None) in ["Cake-LP", ]:
+            #refresh rate and supply for LP
+            token = None
         if token: return token
         
         #lookup in blockchain
         assert self.w3.isConnected() 
         token = self.w3.eth.contract(address=t_address, abi = constants.token_abi)
         
-        print(t_address)
+        #print(t_address)
         token_data = {'name' : token.functions.name().call(),
                       'symbol': token.functions.symbol().call(),
                       'address': t_address,
@@ -157,7 +159,9 @@ class TokenTracker:
             
             token_data['pair'] = f"{t0_data['symbol']}%{t1_data['symbol']}"
             token_data['subtokens'] = [t0_data, t1_data]
-            token_data['rate'] = self.swap_rate(t0_address, t1_address, t_address)
+            token_data['reserves'] = token.functions.getReserves().call()[:2]
+            token_data['reserves'] = [int(self.w3.fromWei(r, 'ether')) for r in token_data['reserves']]
+            token_data['rate'] = token_data['reserves'][0]/token_data['reserves'][1]
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"
             
         self.data[self.w3.toChecksumAddress(t_address)] = token_data
