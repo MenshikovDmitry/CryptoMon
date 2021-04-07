@@ -362,11 +362,29 @@ class BlockChainLiquidityPairsTracker(CryptoMonitor):
         bs_tx = "https://bscscan.com/tx/"
         bs_token = "https://bscscan.com/address/"
         cmc_token = "https://coinmarketcap.com/currencies/"
+        report=""
+        src_tokens = ['WBNB', 'BUSD', 'BNB']
+        t0, t1 = token_inf['pair'].split('%')
+        new_token = 0 if t1 in src_tokens else 1 # the one that is being promoted
+        src_token = 1 if new_token==0 else 0
+        print(f"new token {token_inf['pair'].split('%')[new_token]}")
+        print(f"base token {token_inf['pair'].split('%')[src_token]}")
+        # price of bnb or busd
+        src_price = self.cmc.token(token_inf['pair'].split('%')[src_token])[0]['quote']['USD']['price']
+        print(f"price of {token_inf['pair'].split('%')[src_token]} is ${src_price}")
         
-        report = ""
         report += f"block no {tx['blockNumber']}, time {datetime.datetime.fromtimestamp(int(tx['timeStamp']))}, [hash](https://bscscan.com/tx/{tx['hash']})"
         report += f"\nFarm: [{token_inf['pair'].replace('%', '-')}]({bs_token}{token_inf['address']})"
+        
         report += f"\nRate: {round(token_inf['rate'],4)} {token_inf['subtokens'][0]['symbol']} for 1 {token_inf['subtokens'][1]['symbol']}"
+        if new_token==0:
+            if token_inf['rate']>0:
+                report+=f"\n{round(1/token_inf['rate']*src_price,4)}$ / {token_inf['subtokens'][0]['symbol']}"
+            else:
+                report+="\nError calculating rates"
+        else:
+            report+=f"\n{round(token_inf['rate']*src_price,4)}$ / {token_inf['subtokens'][1]['symbol']}"
+
         report += f"\nReserves: {token_inf['reserves']}"
         for i, st in enumerate(token_inf['subtokens']):
             report += f"\n-----\n[Token {i+1}]({bs_token}{st['address']})"
