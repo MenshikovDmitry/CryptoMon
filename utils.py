@@ -100,11 +100,15 @@ class Messenger:
 #==========================================================================================
 
 class TokenTracker:
-    def __init__(self):
+    def __init__(self, BSCSCAN_API_KEY=None):
         self.filename = "_w3_token_tracker_data.json"
         self.caption = "====Token Tracker===="
         self.data = self.load_data()
         self.base_tokens = "WBNB, BUSD"
+        if BSCSCAN_API_KEY:
+            self.bsc = BscScan(BSCSCAN_API_KEY)
+        else:
+            self.bsc = None
         if not self.data: 
             self.data = {}
             print("No data loaded")
@@ -149,22 +153,48 @@ class TokenTracker:
 
         raise "WTF"
 #------------------------------------------------------------------------
+    def fetch_pools(self, n_blocks=100):
+        """fetch data about recent pools transactions"""
+        assert self.bsc, "No bscscan API key provided"
+        block = self.w3.eth.block_number
+        transactions = self.bsc.get_bep20_token_transfer_events_by_address(constants.pancake_router_address,
+                                    startblock = block-n_blocks,
+                                    endblock = None,
+                                    sort = 'asc')
+        txs = [t for t in transactions if t['to']!=constants.pancake_router_address]
+        new_pools = [t['to'] for t in txs if not t['to'] in self.data.keys()]
+        new_pools = list(set(new_pools))
+
+        _ = self.token(new_pools, update=False, force=False, workers=20)
+
+
+
+#------------------------------------------------------------------------
+
     def pools(self, token_address):
         """List of LP pools for this token address"""
+        token_address = self.w3.toChecksumAddress(token_address)
         ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
                                                                  or token_address == v['subtokens'][1]['address'])]
         return ps
 #------------------------------------------------------------------------
 
-    def token(self, token_address, update = True, force = False):
+    def token(self, token_address, update = True, force = False, workers = 10):
         if type(token_address)==str:
             token_address = [token_address,]
 
         def get_token_wrapper(token_address):
-            return self.get_token(token_address, update, force)
+            return self.get_token(token_address, update=update, force=force)
 
-        p = ThreadPool(10)
+        p = ThreadPool(workers)
         token_data = p.map(get_token_wrapper, token_address)
+
+        new_ones = [t for t in token_data if t and not t['address'] in self.data.keys()]
+
+        for t in new_ones:
+            self.data[t['address']] = t
+
+        if len(new_ones)>0: self.save_data()
 
         if len(token_data)==1:
             return token_data[0]
@@ -208,8 +238,6 @@ class TokenTracker:
                 token_data['rate']=0
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"     
 
-            self.data[self.w3.toChecksumAddress(t_address)] = token_data
-            self.save_data()
             return token_data
 
         
@@ -218,20 +246,23 @@ class TokenTracker:
         token = self.w3.eth.contract(address=t_address, abi = constants.token_abi)
 
         #print(t_address)
-        token_data = {'name' : token.functions.name().call(),
-                      'symbol': token.functions.symbol().call(),
-                      'address': t_address,
-                      'pair' : None,
-                      'subtokens': None,}       
-       
+        try:
+            token_data = {'name' : token.functions.name().call(),
+                        'symbol': token.functions.symbol().call(),
+                        'address': t_address,
+                        'pair' : None,
+                        'subtokens': None,}       
+        except Exception as e:
+            print(f"Error on Contract {t_address}:",e)
+            return None
         #Liquidity pair
         if token_data['symbol'] in ["Cake-LP", ]:
             token = self.w3.eth.contract(address=t_address, abi = constants.lp_abi)
             t0_address = token.functions.token0().call()
             t1_address = token.functions.token1().call()
             
-            t0_data = self.token(t0_address)
-            t1_data = self.token(t1_address)
+            t0_data = self.get_token(t0_address)
+            t1_data = self.get_token(t1_address)
             
             token_data['pair'] = [t0_data['symbol'], t1_data['symbol']]
             token_data['subtokens'] = [t0_data, t1_data]
@@ -248,9 +279,6 @@ class TokenTracker:
                 if token_data['pair'][i].upper() in self.base_tokens:
                     token_data['base']=i
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"
-            
-        self.data[self.w3.toChecksumAddress(t_address)] = token_data
-        self.save_data()
         return token_data        
 #==========================================================================================
 #==========================================================================================
