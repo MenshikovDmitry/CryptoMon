@@ -102,6 +102,7 @@ class TokenTracker:
         self.filename = "_w3_token_tracker_data.json"
         self.caption = "====Token Tracker===="
         self.data = self.load_data()
+        self.base_tokens = "WBNB, BUSD"
         if not self.data: 
             self.data = {}
             print("No data loaded")
@@ -147,7 +148,7 @@ class TokenTracker:
         raise "WTF"
 #------------------------------------------------------------------------
 
-    def token(self, token_address, force = False):
+    def token(self, token_address, update = True, force = False):
 
         #check that the address is correct
         try:
@@ -163,15 +164,36 @@ class TokenTracker:
         #lookup in dict
         token = self.data.get(t_address, None)
 
-        if force: token=None # downloading new data either way
-        if token and token.get('symbol', None) in ["Cake-LP", ]:
-            #refresh rate and supply for LP
-            token = None
-        if token: return token
+        #forced update
+        if force: token = None
+
+        #do not need to update
+        if token and not update:
+            return token
+        
+        # update only reserves for Liquidity pair
+        if token and update and token.get('symbol', None) in ["Cake-LP", ]:
+            assert self.w3.isConnected() 
+            token_data = token 
+            token = self.w3.eth.contract(address=t_address, abi = constants.lp_abi)
+            token_data['reserves'] = token.functions.getReserves().call()[:2]
+            token_data['reserves'] = [int(self.w3.fromWei(r, 'ether')) for r in token_data['reserves']]
+            if token_data['reserves'][0]>0 and token_data['reserves'][1]>0:
+                token_data['rate'] = token_data['reserves'][0]/token_data['reserves'][1]
+            else:
+                token_data['rate']=0
+            token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"     
+
+            self.data[self.w3.toChecksumAddress(t_address)] = token_data
+            self.save_data()
+            return token_data
+
         
         #lookup in blockchain
         assert self.w3.isConnected() 
         token = self.w3.eth.contract(address=t_address, abi = constants.token_abi)
+
+        
         
         #print(t_address)
         token_data = {'name' : token.functions.name().call(),
@@ -189,11 +211,20 @@ class TokenTracker:
             t0_data = self.token(t0_address)
             t1_data = self.token(t1_address)
             
-            token_data['pair'] = f"{t0_data['symbol']}%{t1_data['symbol']}"
+            token_data['pair'] = [t0_data['symbol'], t1_data['symbol']]
             token_data['subtokens'] = [t0_data, t1_data]
             token_data['reserves'] = token.functions.getReserves().call()[:2]
             token_data['reserves'] = [int(self.w3.fromWei(r, 'ether')) for r in token_data['reserves']]
-            token_data['rate'] = token_data['reserves'][0]/token_data['reserves'][1]
+            if token_data['reserves'][0]>0 and token_data['reserves'][1]>0:
+                token_data['rate'] = token_data['reserves'][0]/token_data['reserves'][1]
+            else:
+                token_data['rate']=0
+            
+            #base token WBNB or BUSD
+            token_data['base']=None
+            for i in [0,1]:
+                if token_data['pair'][i].upper() in self.base_tokens:
+                    token_data['base']=i
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"
             
         self.data[self.w3.toChecksumAddress(t_address)] = token_data

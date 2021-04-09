@@ -364,17 +364,18 @@ class BlockChainLiquidityPairsTracker(CryptoMonitor):
         cmc_token = "https://coinmarketcap.com/currencies/"
         report=""
         src_tokens = ['WBNB', 'BUSD', 'BNB']
-        t0, t1 = token_inf['pair'].split('%')
+        #print(token_inf['pair'])
+        t0, t1 = token_inf['pair']
         new_token = 0 if t1 in src_tokens else 1 # the one that is being promoted
         src_token = 1 if new_token==0 else 0
-        print(f"new token {token_inf['pair'].split('%')[new_token]}")
-        print(f"base token {token_inf['pair'].split('%')[src_token]}")
+        #print(f"new token {token_inf['pair'][new_token]}")
+        #print(f"base token {token_inf['pair'][src_token]}")
         # price of bnb or busd
-        src_price = self.cmc.token(token_inf['pair'].split('%')[src_token])[0]['quote']['USD']['price']
-        print(f"price of {token_inf['pair'].split('%')[src_token]} is ${src_price}")
+        src_price = self.cmc.token(token_inf['pair'][src_token])[0]['quote']['USD']['price']
+        #print(f"price of {token_inf['pair'][src_token]} is ${src_price}")
         
         report += f"block no {tx['blockNumber']}, time {datetime.datetime.fromtimestamp(int(tx['timeStamp']))}, [hash](https://bscscan.com/tx/{tx['hash']})"
-        report += f"\nFarm: [{token_inf['pair'].replace('%', '-')}]({bs_token}{token_inf['address']})"
+        report += f"\nFarm: [{'-'.join(token_inf['pair'])}]({bs_token}{token_inf['address']})"
         
         report += f"\nRate: {round(token_inf['rate'],4)} {token_inf['subtokens'][0]['symbol']} for 1 {token_inf['subtokens'][1]['symbol']}"
         if new_token==0:
