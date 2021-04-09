@@ -147,6 +147,12 @@ class TokenTracker:
 
         raise "WTF"
 #------------------------------------------------------------------------
+    def pools(self, token_address):
+        """List of LP pools for this token address"""
+        ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
+                                                                 or token_address == v['subtokens'][1]['address'])]
+        return ps
+#------------------------------------------------------------------------
 
     def token(self, token_address, update = True, force = False):
 
