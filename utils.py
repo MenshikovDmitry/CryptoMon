@@ -4,6 +4,8 @@ import datetime
 import json
 import os
 
+from multiprocessing.pool import ThreadPool
+
 #telegram
 import telebot
 
@@ -155,6 +157,22 @@ class TokenTracker:
 #------------------------------------------------------------------------
 
     def token(self, token_address, update = True, force = False):
+        if type(token_address)==str:
+            token_address = [token_address,]
+
+        def get_token_wrapper(token_address):
+            return self.get_token(token_address, update, force)
+
+        p = ThreadPool(10)
+        token_data = p.map(get_token_wrapper, token_address)
+
+        if len(token_data)==1:
+            return token_data[0]
+
+        return token_data
+#------------------------------------------------------------------------        
+
+    def get_token(self, token_address, update = True, force = False):
 
         #check that the address is correct
         try:
@@ -199,8 +217,6 @@ class TokenTracker:
         assert self.w3.isConnected() 
         token = self.w3.eth.contract(address=t_address, abi = constants.token_abi)
 
-        
-        
         #print(t_address)
         token_data = {'name' : token.functions.name().call(),
                       'symbol': token.functions.symbol().call(),
