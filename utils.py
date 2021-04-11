@@ -49,7 +49,7 @@ from threading import Thread
 #========================================================================
 
 class TelegramMessenger:
-    def __init__(self, TOKEN):
+    def __init__(self, TOKEN, polling=True):
         self.bot = telebot.TeleBot(TOKEN, parse_mode='Markdown')
         self.contacts = {}
         self.broadcast_list = []
@@ -72,12 +72,13 @@ class TelegramMessenger:
             self.bot.send_message(message.chat.id, msg, parse_mode=None)    
             
         #start the thread
-        self.thread = Thread(target = self.bot.polling, args = ())
-        self.thread.start()
+        if polling:
+            self.thread = Thread(target = self.bot.polling, args = ())
+            self.thread.start()
 #------------------------------------------------------------------------
 
     def message(self, chat_id, message):
-        self.bot.send_message(chat_id, message, parse_mode=None)        
+        self.bot.send_message(chat_id, message, disable_web_page_preview=True)        
 #------------------------------------------------------------------------
 
     def broadcast(self, feed):
@@ -156,6 +157,7 @@ class TokenTracker:
     def fetch_pools(self, n_blocks=100):
         """fetch data about recent pools transactions"""
         assert self.bsc, "No bscscan API key provided"
+        print('fetching pools data')
         block = self.w3.eth.block_number
         transactions = self.bsc.get_bep20_token_transfer_events_by_address(constants.pancake_router_address,
                                     startblock = block-n_blocks,
@@ -176,18 +178,26 @@ class TokenTracker:
         token_address = self.w3.toChecksumAddress(token_address)
         ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
                                                                  or token_address == v['subtokens'][1]['address'])]
-        return ps
+        if len(ps)>0:
+            return ps
+
+        self.fetch_pools(10)
+        ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
+                                                                 or token_address == v['subtokens'][1]['address'])]
+        return ps                                                         
 #------------------------------------------------------------------------
 
     def token(self, token_address, update = True, force = False, workers = 10):
         if type(token_address)==str:
-            token_address = [token_address,]
+            #only one
+            token_data = [self.get_token(token_address, update=update, force=force),]
+        else:
 
-        def get_token_wrapper(token_address):
-            return self.get_token(token_address, update=update, force=force)
+            def get_token_wrapper(token_address):
+                return self.get_token(token_address, update=update, force=force)
 
-        p = ThreadPool(workers)
-        token_data = p.map(get_token_wrapper, token_address)
+            p = ThreadPool(workers)
+            token_data = p.map(get_token_wrapper, token_address)
 
         new_ones = [t for t in token_data if t and not t['address'] in self.data.keys()]
 
