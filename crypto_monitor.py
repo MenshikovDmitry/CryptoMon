@@ -2,6 +2,7 @@ import time
 from monitors import (FarmChecker,
                       BinanceCheker,  
                       BlockChainLiquidityPairsTracker,
+                      PCS_DeveloperMon
                      )
 from utils import TelegramMessenger, CoinMarketCap, TokenTracker
 
@@ -21,8 +22,10 @@ binance_mon = BinanceCheker(msgr, constants.BSCSCAN_API_KEY,
                                   constants.BINANCE_API_SECRET)
 pairtracker = BlockChainLiquidityPairsTracker(msgr, cmc, tokentracker, 
                                                 constants.BSCSCAN_API_KEY)
+pcs_dev_monitor = PCS_DeveloperMon(msgr, tokentracker, cmc, constants.BSCSCAN_API_KEY)
 
-bots = [farmer, binance_mon, pairtracker]
+
+bots = [farmer, binance_mon, pairtracker, pcs_dev_monitor]
 
 while True:
     for bot in bots:

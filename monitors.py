@@ -1,7 +1,7 @@
 #binance
 from binance.client import Client
 
-
+from web3 import Web3
 
 #bscScan
 from bscscan import BscScan
@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore")
 
 import datetime, time, json, os, re
 
+import constants
 #========================================================================
 
 
@@ -459,7 +460,7 @@ class BlockChainLiquidityPairsTracker(CryptoMonitor):
 #========================================================================
 
 
-class PCS_DeveloperMon(monitors.CryptoMonitor):
+class PCS_DeveloperMon(CryptoMonitor):
     def __init__(self, messenger, token_tracker, coimarket_cap, bsc_api_key, data_filename=None):
         self.bsc = BscScan(bsc_api_key)
         self.cmc = coimarket_cap
@@ -516,7 +517,7 @@ class PCS_DeveloperMon(monitors.CryptoMonitor):
             token_address = self.w3.toChecksumAddress(tx['contractAddress'])
             tt_data = self.tt.token(token_address)
             
-            cmc_data = self.cmc.token(t_name)
+            cmc_data = self.cmc.token(token_symbol)
             
             if cmc_data:    
                 #it might be more than one token with this name
