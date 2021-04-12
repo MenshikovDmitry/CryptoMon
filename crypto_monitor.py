@@ -15,14 +15,14 @@ msgr.contacts = {'chat': constants.chatid,
 msgr.broadcast_list = ['dima']
 
 cmc = CoinMarketCap(constants.COIN_MARKET_CAP_API_TOKEN)
-tokentracker = TokenTracker()
+tokentracker = TokenTracker(constants.BSCSCAN_API_KEY))
 
 farmer = FarmChecker(msgr, cmc)
 binance_mon = BinanceCheker(msgr, constants.BSCSCAN_API_KEY, 
                                   constants.BINANCE_API_SECRET)
 pairtracker = BlockChainLiquidityPairsTracker(msgr, cmc, tokentracker, 
                                                 constants.BSCSCAN_API_KEY)
-pcs_dev_monitor = PCS_DeveloperMon(msgr, tokentracker, cmc, constants.BSCSCAN_API_KEY)
+pcs_dev_monitor = PCS_DeveloperMon(msgr, tokentracker, cmc, constants.BSCSCAN_API_KEY, )
 
 
 bots = [farmer, binance_mon, pairtracker, pcs_dev_monitor]
