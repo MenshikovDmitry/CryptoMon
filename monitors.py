@@ -460,6 +460,7 @@ class BlockChainLiquidityPairsTracker(CryptoMonitor):
 #========================================================================
 
 
+
 class PCS_DeveloperMon(CryptoMonitor):
     def __init__(self, messenger, token_tracker, coimarket_cap, bsc_api_key, data_filename=None):
         self.bsc = BscScan(bsc_api_key)
@@ -472,7 +473,7 @@ class PCS_DeveloperMon(CryptoMonitor):
         self.ignore_tokens = [constants.CAKE_address]
         bsc = constants.binance_smart_chain
         self.w3 = Web3(Web3.HTTPProvider(bsc))
-        
+        self.pancake_dev_addresses = [self.w3.toChecksumAddress(addr) for addr in constants.pancake_dev_address]        
         if not self.data:
             self.data = {'last_block': 6468900,
                          'farms_live': [],
@@ -482,36 +483,154 @@ class PCS_DeveloperMon(CryptoMonitor):
         super().__init__(messenger)
 #------------------------------------------------------------------------        
         
-    def check_new_transfers(self):
+    def tx_report(self, tt_data, tx, tx_type):
         bs_tx = "https://bscscan.com/tx/"
         bs_token = "https://bscscan.com/address/"
-        cmc_token = "https://coinmarketcap.com/currencies/"
         
-        update_info=[]
+        token_symbol = tt_data['symbol']
+        token_address = tt_data['address']
+        pools = self.tt.pools(tt_data['address'])
+        cmc_report = self.cmc.report(token_symbol)
+        
+        report = ""
+        report+=f"*{tx_type}* [TX]({bs_tx}{tx['hash']}): {int(round(tx['amount']//1000))}K {token_symbol} (${tx['value']}K)"
+        report+=f"\n{datetime.datetime.fromtimestamp(int(tx['timeStamp']))} Block {tx['blockNumber']}"
+        report+=f"\n*name:* {tx['tokenName']} ([{tx['tokenSymbol']}]({bs_token}{token_address}))"
+        report+=f"\n*address:* {token_address}"
+        report+=f"\n-----\n*Farms:* "
+        for pool in pools:
+            base_token = pool['base']
+            new_one = 1 if base_token==0 else 0
+            base_price = self.cmc.token(pool['pair'][base_token])[0]['quote']['USD']['price']
 
-        try:
-            transactions = self.bsc.get_bep20_token_transfer_events_by_address(constants.pancake_dev_address,
-                                        startblock = str(int(self.data['last_block'])+1),
-                                        endblock = None,
-                                        sort = 'asc')
-        except AssertionError:
-            #No Transaction Found
-            self.save_data()
-            return None
-        
-        if len(transactions)==0:
-            return None
-        
-        self.data['last_block'] = transactions[-1]['blockNumber']
+            report+=f"\n[{'-'.join(pool['pair'])}]({bs_token}{pool['address']}) {'/'.join([str(p) for p in pool['reserves']])} (${int(pool['reserves'][base_token]*base_price*2//1000)}K)"
 
-        for tx in transactions:
-            report = ""
-            if tx['to'] == constants.pancake_dev_address:
-                transaction_type = "IN"
-                destination_address = None
+            if pool['rate']==0:
+                rate = -1
             else:
+                if base_token==0:
+                    rate=1/pool['rate']
+                else:
+                    rate=pool['rate']
+            report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
+        report+="\n\n"+cmc_report
+    
+        return report
+#------------------------------------------------------------------------          
+    
+    def check_transactions(self):
+        update_info=[]
+        bep20_transactions = []
+        norm_transactions = []
+        
+        for developer in self.pancake_dev_addresses:
+            try:
+                bep20_txs = self.bsc.get_bep20_token_transfer_events_by_address(developer,
+                                            startblock = str(int(self.data['last_block'])+1),
+                                            endblock = None,
+                                            sort = 'asc')
+            except AssertionError:
+                #No Transaction Found
+                self.save_data()
+                bep20_txs = []
+            bep20_transactions += bep20_txs
+            
+            try:
+                norm_txs = self.bsc.get_normal_txs_by_address(address = developer,
+                                                      startblock = str(int(self.data['last_block'])+1),
+                                                      endblock = None,
+                                                      sort='asc')
+            except AssertionError:
+                #No Transaction Found
+                self.save_data()
+                norm_txs = []
+            norm_transactions += norm_txs     
+            
+        #print(len(transactions))
+        update_unfo=[]
+        
+        if len(bep20_transactions + norm_transactions)==0:
+            return None
+            
+        blocks_numbers = [int(tx['blockNumber']) for tx  in bep20_transactions] + \
+                         [int(tx['blockNumber']) for tx  in norm_transactions]
+        self.data['last_block'] = max(blocks_numbers)
+        self.save_data()
+        
+        report = self.process_bep20_txs(bep20_transactions)
+        if report: update_info += report
+            
+        report = self.process_norm_txs(norm_transactions)
+        if report: update_info += report
+            
+            
+        if len(update_info)==0: return None        
+        return update_info
+#------------------------------------------------------------------------  
+
+    def process_norm_txs(self, transactions):
+        create_contract = '0x60806040526'
+        bs_addr = "https://bscscan.com/address/"
+        bs_tx = "https://bscscan.com/tx/"
+        bs_block = "https://bscscan.com/block/countdown/"
+        
+        update_info = []
+        for tx in transactions:
+            if not tx['input'].startswith(create_contract): continue
+            contract_address = self.w3.toChecksumAddress(tx['contractAddress'])
+            contract = self.w3.eth.contract(contract_address, abi = constants.smart_chief_abi)
+            try:
+                reward_token_address = contract.functions.rewardToken().call()
+            except:
+                #Not a smartChief contract
+                print(f"Not a SmartChief contract: {bs_addr}{contract_address}")
+                continue
+            start_block = contract.functions.startBlock().call()
+            block_delta = start_block - int(tx['blockNumber'])
+            sec_delta = block_delta * 3 # average block time
+            start_time = datetime.datetime.fromtimestamp(int(tx['timeStamp'])) + datetime.timedelta(seconds=sec_delta)
+
+            tt_data = self.tt.token(reward_token_address)
+            pools = self.tt.pools(reward_token_address)
+            cmc_report = self.cmc.report(tt_data['symbol'])
+            
+            report = ""
+            report += f"[SmartChief]({bs_addr}{contract_address}) [created]({bs_tx}{tx['hash']})"
+            report += f"\n{datetime.datetime.fromtimestamp(int(tx['timeStamp']))}; Start Block [{start_block}]({bs_block}{start_block})"
+            report += f"\nLive at {start_time}"
+            report += f"\n*name:* {tt_data['name']} ([{tt_data['symbol']}]({bs_addr}{reward_token_address}))"
+            report += f"\n*address:* {reward_token_address}"            
+            report += f"\n-----\n*Farms:* "
+            
+            for pool in pools:
+                base_token = pool['base']
+                new_one = 1 if base_token==0 else 0
+                base_price = self.cmc.token(pool['pair'][base_token])[0]['quote']['USD']['price']
+            
+                report+=f"\n[{'-'.join(pool['pair'])}]({bs_addr}{pool['address']}) {'/'.join([str(p) for p in pool['reserves']])} (${int(pool['reserves'][base_token]*base_price*2//1000)}K)"    
+                if pool['rate']==0:
+                    rate = -1
+                else:
+                    if base_token==0:
+                        rate=1/pool['rate']
+                    else:
+                        rate=pool['rate']
+                report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
+            report += "\n\n" + cmc_report
+            update_info.append(report)
+        return update_info
+
+#------------------------------------------------------------------------  
+    
+    def process_bep20_txs(self, transactions):
+        update_info = []
+        for tx in transactions:
+            tx['from'] = self.w3.toChecksumAddress(tx['from'])
+            report = ""
+            if tx['from'] in self.pancake_dev_addresses:
                 transaction_type = "OUT"
-                destination_address = tx['to']
+            else:
+                transaction_type = "IN"
                 
             token_symbol = tx['tokenSymbol']
             token_address = self.w3.toChecksumAddress(tx['contractAddress'])
@@ -527,10 +646,13 @@ class PCS_DeveloperMon(CryptoMonitor):
                 price = 0
             
             amount = int(self.w3.fromWei(int(tx['value']), 'ether'))
+            tx['amount'] = amount
             #value in $1000
             value = int(amount*price//1000)
+            tx['value'] = value
+            #print(transaction_type, value, token_symbol, )
             
-            if value<100: continue
+            if transaction_type=='IN' and value<100: continue
             if token_address in self.ignore_tokens: continue
                 
             if transaction_type=="IN":
@@ -540,40 +662,17 @@ class PCS_DeveloperMon(CryptoMonitor):
                 #out transaction
                 if not token_address in self.data['farms_live']:
                     self.data['farms_live'].append(token_address)
+                    try:
+                        self.data['farms_pending'].remove(token_address)
+                    except:
+                        pass
                     
-            
-            pools = self.tt.pools(tt_data['address'])
-            cmc_report = self.cmc.report(token_symbol)
-            report+=f"*{transaction_type}* [TX]({bs_tx}{tx['hash']}): {int(round(amount//1000))}K {token_symbol} (${value}K)"
-            report+=f"\n{datetime.datetime.fromtimestamp(int(tx['timeStamp']))} Block {tx['blockNumber']}"
-            report+=f"\n*name:* {tx['tokenName']} ([{tx['tokenSymbol']}]({bs_token}{token_address}))"
-            report+=f"\n*address:* {token_address}"
-            report+=f"\n-----\n*Farms:* "
-            for pool in pools:
-                base_token = pool['base']
-                new_one = 1 if base_token==0 else 0
-                base_price = self.cmc.token(pool['pair'][base_token])[0]['quote']['USD']['price']
-                
-                report+=f"\n[{'-'.join(pool['pair'])}]({bs_token}{pool['address']}) {'/'.join([str(p) for p in pool['reserves']])} (${int(pool['reserves'][base_token]*base_price*2//1000)}K)"
-                
-                if pool['rate']==0:
-                    rate = -1
-                else:
-                    if base_token==0:
-                        rate=1/pool['rate']
-                    else:
-                        rate=pool['rate']
-                report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
-        
-            report+="\n\n"+cmc_report
-                      
+            report = self.tx_report(tt_data, tx, transaction_type)
             update_info.append(report)
-        
-        self.data['last_block']
         return update_info
 #------------------------------------------------------------------------    
     
     def check_updates(self):
-        return self.check_new_transfers()
+        return self.check_transactions()
 #========================================================================
 #========================================================================
