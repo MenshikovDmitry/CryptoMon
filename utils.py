@@ -3,6 +3,7 @@ import re
 import datetime
 import json
 import os
+import logging
 
 from multiprocessing.pool import ThreadPool
 
@@ -136,7 +137,7 @@ class TokenTracker:
         print(f"Loaded {filename}, timestamp: {data['time']}")
         return data['data']            
 #------------------------------------------------------------------------
-
+    #deprecated
     def swap_rate(self, from_token, to_token, liq_pool, fee = 0.003):
         lp_contract = self.w3.eth.contract(address=liq_pool, abi=constants.lp_abi) 
         t0_address = lp_contract.functions.token0().call()
@@ -154,10 +155,11 @@ class TokenTracker:
 
         raise "WTF"
 #------------------------------------------------------------------------
+    #deprecated
     def fetch_pools(self, n_blocks=100):
         """fetch data about recent pools transactions"""
         assert self.bsc, "No bscscan API key provided"
-        print('fetching pools data')
+        logging.info('fetching pools data')
         block = self.w3.eth.block_number
         transactions = self.bsc.get_bep20_token_transfer_events_by_address(constants.pancake_router_address,
                                     startblock = block-n_blocks,
@@ -180,8 +182,14 @@ class TokenTracker:
                                                                  or token_address == v['subtokens'][1]['address'])]
         if len(ps)>0:
             return ps
+        #get data from the factory for WBNB and BUSD only
+        factory = self.w3.eth.contract(address=constants.pancake_factory_address, abi=constants.pancake_factory_abi)
 
-        self.fetch_pools(10)
+        base_tokens = [constants.WBNB_address, constants.BUSD_address]
+        for bt in base_tokens:
+            pool_address = factory.functions.getPair(token_address, self.w3.toChecksumAddress(bt)).call()
+            if '0000000000000000' in pool_address: continue # no such pool
+            _ = self.token(pool_address)
         ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
                                                                  or token_address == v['subtokens'][1]['address'])]
         return ps                                                         
@@ -218,7 +226,7 @@ class TokenTracker:
         try:
             t_address = self.w3.toChecksumAddress(token_address)
         except Exception as e:
-            print(f"{token_address} is not a correct address", e)
+            logging.error(f"{token_address} is not a correct address: " + str(e))
             return None
 
         if '0000000000000000000000000000000000' in t_address:
@@ -260,10 +268,11 @@ class TokenTracker:
             token_data = {'name' : token.functions.name().call(),
                         'symbol': token.functions.symbol().call(),
                         'address': t_address,
+                        'decimals': token.functions.decimals().call(),
                         'pair' : None,
                         'subtokens': None,}       
         except Exception as e:
-            print(f"Error on Contract {t_address}:",e)
+            logging.warning(f"Error on Contract {t_address}:",e)
             return None
         #Liquidity pair
         if token_data['symbol'] in ["Cake-LP", ]:

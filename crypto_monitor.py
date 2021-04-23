@@ -9,6 +9,12 @@ from utils import TelegramMessenger, CoinMarketCap, TokenTracker
 #consts
 import constants
 
+import logging
+logfile = "main.log"
+logging.basicConfig(level = logging.DEBUG,filename=logfile,
+                    format = u'%(filename)s, %(lineno), %(levelname)-8s, %(asctime)s,   %(message)s')
+logger=logging.getLogger()
+
 msgr = TelegramMessenger(constants.TELEGRAM_TOKEN)
 msgr.contacts = {'chat': constants.chatid,
                  'dima': constants.dimaid}

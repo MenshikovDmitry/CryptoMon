@@ -63,7 +63,7 @@ class CryptoMonitor:
         if len(news)==0:
             return
         
-        feed = [f"{self.caption}\n{datetime.datetime.now().replace(microsecond=0)}",] + news
+        feed = [f"*{self.caption}*\n{datetime.datetime.now().replace(microsecond=0)}",] + news
         self.messenger.broadcast(feed)
         
         if verbose:
@@ -466,7 +466,7 @@ class PCS_DeveloperMon(CryptoMonitor):
         self.bsc = BscScan(bsc_api_key)
         self.cmc = coimarket_cap
         self.filename = "_dev_mon.json"
-        self.caption = "====Developer Monitor==="
+        self.caption = "===Developer Monitor==="
         self.data = self.load_data(data_filename)
         self.bsc = BscScan(bsc_api_key)
         self.tt = token_tracker
@@ -493,11 +493,11 @@ class PCS_DeveloperMon(CryptoMonitor):
         cmc_report = self.cmc.report(token_symbol)
         
         report = ""
-        report+=f"*{tx_type}* [TX]({bs_tx}{tx['hash']}): {int(round(tx['amount']//1000))}K {token_symbol} (${tx['value']}K)"
+        report+=f"*{tx_type}* [TX]({bs_tx}{tx['hash']}): {int(round(tx['amount']//1000))}K {token_symbol} (${tx['cmc_value']}K) (${tx['pcs_value']}K)"
         report+=f"\n{datetime.datetime.fromtimestamp(int(tx['timeStamp']))} Block {tx['blockNumber']}"
         report+=f"\n*name:* {tx['tokenName']} ([{tx['tokenSymbol']}]({bs_token}{token_address}))"
         report+=f"\n*address:* {token_address}"
-        report+=f"\n-----\n*Farms:* "
+        report+=f"\n-----\n*LiqPools:* "
         for pool in pools:
             base_token = pool['base']
             new_one = 1 if base_token==0 else 0
@@ -513,11 +513,38 @@ class PCS_DeveloperMon(CryptoMonitor):
                 else:
                     rate=pool['rate']
             report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
+        
+        report+=f"\nPCS price {round(self.pancake_price(token_address),4)} BUSD for 1 {token_symbol}"
+        if tt_data['decimals']!=18:
+            report+=f"\n*Price may be wrong!! *{tt_data['decimals']} decimals!!"
         report+="\n\n"+cmc_report
     
         return report
 #------------------------------------------------------------------------          
     
+    def pancake_price(self, token_address):
+        """returns PCS price in BUSD directly and through WBNB"""
+        token_address = self.w3.toChecksumAddress(token_address)
+        router = self.w3.eth.contract(address=constants.pancake_router_address, abi = constants.pancake_router_abi)
+        route1 = [self.w3.toChecksumAddress(token_address),
+                  self.w3.toChecksumAddress(constants.WBNB_address),
+                  self.w3.toChecksumAddress(constants.BUSD_address)]
+        route2 = [self.w3.toChecksumAddress(token_address),
+                  self.w3.toChecksumAddress(constants.BUSD_address)]   
+        prices=[]
+        for path in [route1, route2]:
+            try:
+                value_wei = router.functions.getAmountsOut(self.w3.toWei(1, 'ether'), path).call()[-1]
+            except Exception as e:
+                value_wei = 0
+                #print(e)
+            prices.append(self.w3.fromWei(value_wei, 'ether'))
+        #print(prices)
+        token_price = max(prices)
+        return token_price
+#------------------------------------------------------------------------
+
+
     def check_transactions(self):
         update_info=[]
         bep20_transactions = []
@@ -600,7 +627,7 @@ class PCS_DeveloperMon(CryptoMonitor):
             report += f"\nLive at {start_time}"
             report += f"\n*name:* {tt_data['name']} ([{tt_data['symbol']}]({bs_addr}{reward_token_address}))"
             report += f"\n*address:* {reward_token_address}"            
-            report += f"\n-----\n*Farms:* "
+            report += f"\n-----\n*LiqPools:* "
             
             for pool in pools:
                 base_token = pool['base']
@@ -616,6 +643,9 @@ class PCS_DeveloperMon(CryptoMonitor):
                     else:
                         rate=pool['rate']
                 report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
+            report+=f"\nPCS price {round(self.pancake_price(reward_token_address),4)} BUSD for 1 {tt_data['symbol']}"
+            if tt_data['decimals']!=18:
+            report+=f"\n*Price may be wrong!! *{tt_data['decimals']} decimals!!"
             report += "\n\n" + cmc_report
             update_info.append(report)
         return update_info
@@ -641,18 +671,20 @@ class PCS_DeveloperMon(CryptoMonitor):
             if cmc_data:    
                 #it might be more than one token with this name
                 #chose lowest price
-                price = min([c['quote']['USD']['price'] for c in cmc_data])
+                cmc_price = min([c['quote']['USD']['price'] for c in cmc_data])
             else:
-                price = 0
-            
+                cmc_price = 0
+            pcs_price = self.pancake_price(token_address)
             amount = int(self.w3.fromWei(int(tx['value']), 'ether'))
             tx['amount'] = amount
             #value in $1000
-            value = int(amount*price//1000)
-            tx['value'] = value
+            cmc_value = int(amount*cmc_price//1000)
+            pcs_value = int(amount*pcs_price//1000)
+            tx['cmc_value'] = cmc_value
+            tx['pcs_value'] = pcs_value
             #print(transaction_type, value, token_symbol, )
             
-            if transaction_type=='IN' and value<100: continue
+            #if transaction_type=='IN' and (cmc_value<1 and pcs_value<1): continue
             if token_address in self.ignore_tokens: continue
                 
             if transaction_type=="IN":
