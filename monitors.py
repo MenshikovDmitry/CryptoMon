@@ -645,7 +645,7 @@ class PCS_DeveloperMon(CryptoMonitor):
                 report+= f"\nRate: {round(rate,4)} {pool['pair'][new_one]} for 1 {pool['pair'][base_token]} (${round(1/rate*base_price,2)})"
             report+=f"\nPCS price {round(self.pancake_price(reward_token_address),4)} BUSD for 1 {tt_data['symbol']}"
             if tt_data['decimals']!=18:
-            report+=f"\n*Price may be wrong!! *{tt_data['decimals']} decimals!!"
+                report+=f"\n*Price may be wrong!! *{tt_data['decimals']} decimals!!"
             report += "\n\n" + cmc_report
             update_info.append(report)
         return update_info
