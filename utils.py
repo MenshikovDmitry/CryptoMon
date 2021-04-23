@@ -272,7 +272,7 @@ class TokenTracker:
                         'pair' : None,
                         'subtokens': None,}       
         except Exception as e:
-            logging.warning(f"Error on Contract {t_address}:",e)
+            logging.warning(f"Error on Contract {t_address}:" + str(e))
             return None
         #Liquidity pair
         if token_data['symbol'] in ["Cake-LP", ]:
