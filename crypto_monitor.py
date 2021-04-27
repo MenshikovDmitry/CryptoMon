@@ -34,6 +34,7 @@ pcs_dev_monitor = PCS_DeveloperMon(msgr, tokentracker, cmc, constants.BSCSCAN_AP
 bots = [farmer, binance_mon, pairtracker, pcs_dev_monitor]
 
 while True:
+    tokentracker.refresh_bnb_price()
     for bot in bots:
         try:
             bot.updates()

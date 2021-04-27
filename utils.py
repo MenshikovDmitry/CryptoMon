@@ -102,20 +102,20 @@ class Messenger:
 #==========================================================================================
 
 class TokenTracker:
-    def __init__(self, BSCSCAN_API_KEY=None):
+    def __init__(self):
         self.filename = "_w3_token_tracker_data.json"
         self.caption = "====Token Tracker===="
         self.data = self.load_data()
-        self.base_tokens = "WBNB, BUSD"
-        if BSCSCAN_API_KEY:
-            self.bsc = BscScan(BSCSCAN_API_KEY)
-        else:
-            self.bsc = None
+        self.base_tokens = ["WBNB", "BUSD"]
+        self.base_tokens_address = [constants.WBNB_address, 
+                                    constants.BUSD_address]
+        
         if not self.data: 
             self.data = {}
             print("No data loaded")
         bsc = constants.binance_smart_chain
         self.w3 = Web3(Web3.HTTPProvider(bsc))
+        self.bnb_price = self.get_bnb_price()
 #------------------------------------------------------------------------
     
     def save_data(self):
@@ -137,56 +137,54 @@ class TokenTracker:
         print(f"Loaded {filename}, timestamp: {data['time']}")
         return data['data']            
 #------------------------------------------------------------------------
-    #deprecated
-    def swap_rate(self, from_token, to_token, liq_pool, fee = 0.003):
-        lp_contract = self.w3.eth.contract(address=liq_pool, abi=constants.lp_abi) 
-        t0_address = lp_contract.functions.token0().call()
-        t1_address = lp_contract.functions.token1().call()
+    def refresh_bnb_price(self):
+        self.bnb_price = self.get_bnb_price()
 
-        t0_bal, t1_bal, *_ = lp_contract.functions.getReserves().call()
-
-        rate = t1_bal/t0_bal
-
-        if from_token==t0_address and to_token==t1_address:
-            return rate*(1-fee)
-
-        if from_token==t1_address and to_token==t0_address:
-            return 1/rate * (1-fee)
-
-        raise "WTF"
+    def get_bnb_price(self):
+        pcs = self.w3.eth.contract(address = constants.pancake_router_address, 
+                                   abi = constants.pancake_router_abi)
+        price = pcs.functions.getAmountsOut(self.w3.toWei(1, 'ether'), 
+                                [self.w3.toChecksumAddress(constants.WBNB_address), 
+                                    self.w3.toChecksumAddress(constants.BUSD_address)]).call()[-1]
+        return float(self.w3.fromWei(price, 'ether'))
 #------------------------------------------------------------------------
-    #deprecated
-    def fetch_pools(self, n_blocks=100):
-        """fetch data about recent pools transactions"""
-        assert self.bsc, "No bscscan API key provided"
-        logging.info('fetching pools data')
-        block = self.w3.eth.block_number
-        transactions = self.bsc.get_bep20_token_transfer_events_by_address(constants.pancake_router_address,
-                                    startblock = block-n_blocks,
-                                    endblock = None,
-                                    sort = 'asc')
-        txs = [t for t in transactions if t['to']!=constants.pancake_router_address]
-        new_pools = [t['to'] for t in txs if not t['to'] in self.data.keys()]
-        new_pools = list(set(new_pools))
-
-        _ = self.token(new_pools, update=False, force=False, workers=20)
-
-
-
+    def total_tvl(self, token_address):
+        token_address = self.w3.toChecksumAddress(token_address)
+        pools = self.pools(token_address)
+        tvl = sum([p['tvl'] for p in pools])
+        return tvl
 #------------------------------------------------------------------------
 
-    def pools(self, token_address):
+    def tvl(self,token_data):
+        reserves = token_data['reserves']
+        base = token_data['base']
+        if not base: return 0
+        base_symbol = token_data['pair'][base]
+        if base_symbol=='BUSD':
+            return reserves[base]*2
+        #assuming WBNB
+        return round(float(reserves[base]) * 2 * self.bnb_price, 2)
+#------------------------------------------------------------------------
+
+    def pools(self, token_address, refresh_pools=True):
         """List of LP pools for this token address"""
         token_address = self.w3.toChecksumAddress(token_address)
         ps = [v for k,v in self.data.items() if v['subtokens'] and (token_address == v['subtokens'][0]['address'] 
                                                                  or token_address == v['subtokens'][1]['address'])]
-        if len(ps)>0:
-            return ps
+        if len(ps)==len(self.base_tokens_address):
+            #exactly same pools
+            if refresh_pools:
+                #refreshing reserves
+                fresh_ps = []
+                for pool in ps:
+                    fresh_ps.append(self.token(pool['address']))
+                return fresh_ps
+            else:
+                return ps
         #get data from the factory for WBNB and BUSD only
         factory = self.w3.eth.contract(address=constants.pancake_factory_address, abi=constants.pancake_factory_abi)
 
-        base_tokens = [constants.WBNB_address, constants.BUSD_address]
-        for bt in base_tokens:
+        for bt in self.base_tokens_address:
             pool_address = factory.functions.getPair(token_address, self.w3.toChecksumAddress(bt)).call()
             if '0000000000000000' in pool_address: continue # no such pool
             _ = self.token(pool_address)
@@ -196,21 +194,29 @@ class TokenTracker:
 #------------------------------------------------------------------------
 
     def token(self, token_address, update = True, force = False, workers = 10):
+
         if type(token_address)==str:
             #only one
-            token_data = [self.get_token(token_address, update=update, force=force),]
+            token_data = [self.get_token(self.w3.toChecksumAddress(token_address), update=update, force=force),]
         else:
 
             def get_token_wrapper(token_address):
-                return self.get_token(token_address, update=update, force=force)
+                return self.get_token(self.w3.toChecksumAddress(token_address), update=update, force=force)
 
             p = ThreadPool(workers)
             token_data = p.map(get_token_wrapper, token_address)
 
         new_ones = [t for t in token_data if t and not t['address'] in self.data.keys()]
 
+        #check if there any new subtokens
+        for t in token_data:
+            if t['subtokens']:
+                for st in t['subtokens']:
+                    if not st['address'] in self.data.keys():
+                        new_ones.append(st)
+
         for t in new_ones:
-            self.data[t['address']] = t
+            self.data[self.w3.toChecksumAddress(t['address'])] = t
 
         if len(new_ones)>0: self.save_data()
 
@@ -242,6 +248,10 @@ class TokenTracker:
         #do not need to update
         if token and not update:
             return token
+
+        #static token
+        if token and not token['pair']:
+            return token
         
         # update only reserves for Liquidity pair
         if token and update and token.get('symbol', None) in ["Cake-LP", ]:
@@ -254,6 +264,7 @@ class TokenTracker:
                 token_data['rate'] = token_data['reserves'][0]/token_data['reserves'][1]
             else:
                 token_data['rate']=0
+            token_data['tvl'] = self.tvl(token_data)
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"     
 
             return token_data
@@ -297,6 +308,8 @@ class TokenTracker:
             for i in [0,1]:
                 if token_data['pair'][i].upper() in self.base_tokens:
                     token_data['base']=i
+            token_data['tvl'] = self.tvl(token_data)
+
             token_data['timestamp'] = f"{datetime.datetime.now().replace(microsecond=0)}"
         return token_data        
 #==========================================================================================
