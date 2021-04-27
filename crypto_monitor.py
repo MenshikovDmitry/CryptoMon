@@ -21,7 +21,7 @@ msgr.contacts = {'chat': constants.chatid,
 msgr.broadcast_list = ['dima']
 
 cmc = CoinMarketCap(constants.COIN_MARKET_CAP_API_TOKEN)
-tokentracker = TokenTracker(constants.BSCSCAN_API_KEY)
+tokentracker = TokenTracker()
 
 farmer = FarmChecker(msgr, cmc)
 binance_mon = BinanceCheker(msgr, constants.BSCSCAN_API_KEY, 
