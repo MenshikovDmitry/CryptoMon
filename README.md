@@ -1,7 +1,7 @@
 # CryptoMon
 ---
-**!ATTENTION!**
-_Hey guys, thanks for visiting this repo. Sorry, I no longer keep developing it. Instead, I am working on hidden fork with some advanced features and signals. If you are interested, please, feel free to join the telegram chat with signals from this bot:_ https://t.me/joinchat/HTdk31mnFcEiU2fp
+*ATTENTION*  
+_Hey guys, thanks for visiting this repo. Sorry, I no longer keep developing it. Instead, I am working on hidden fork with some advanced features and signals. If you are interested, please, feel free to join the telegram chat with signals from this bot:_   https://t.me/joinchat/HTdk31mnFcEiU2fp  
 _So far it is free of charge_ :)
 ---
   
